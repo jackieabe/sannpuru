@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>日本語単語練習ツール（発音判定＆セッション録音付）</title>
+   <script>
+        const wordData = [
+            { 
+                h: "ほっかいどうはしんせんなかにとかうにとかたべられますよ", 
+                k: "北海道は新鮮なカニとかウニとか食べられますよ。", 
+                r: "Hokkaidou wa shinsen na kani toka uni toka taberaremasu yo.", 
+                zh: "在北海道可以吃到新鮮的螃蟹和海膽喔。", 
+                accepted: ["北海道は新鮮なカニとかウニとか食べられますよ", "北海道は新鮮なかにとかうにとか食べられますよ", "ほっかいどうはしんせんなかにとかうにとかたべられますよ"] 
+            },
+            { 
+                h: "とうきょうはあそぶところがいろいろあるからいちにちじゅうたのしめますよ", 
+                k: "東京は遊ぶところが色々あるから一日中楽しめますよ。", 
+                r: "Toukyou wa asobu tokoro ga iroiro aru kara ichinichijuu tanoshimemasu yo.", 
+                zh: "東京有很多好玩的地方，所以可以玩上一整天喔。", 
+                accepted: ["東京は遊ぶところが色々あるから一日中楽しめますよ", "東京は遊ぶ所が色々あるから一日中楽しめますよ", "とうきょうはあそぶところがいろいろあるからいちにちじゅうたのしめますよ"] 
+            },
+            { 
+                h: "おきなわはあたたかいから、はるからあきまでおよげますよ", 
+                k: "沖縄は暖かいから、春から秋まで泳げますよ。", 
+                r: "Okinawa wa atatakai kara, haru kara aki made oyogemasu yo.", 
+                zh: "沖繩很溫暖，所以從春天到秋天都可以游泳喔。", 
+                accepted: ["沖縄は暖かいから春から秋まで泳げますよ", "沖縄はあったかいから春から秋まで泳げますよ", "おきなわはあたたかいからはるからあきまでおよげますよ"] 
+            },
+            { 
+                h: "ばすでいけるってききました", 
+                k: "バスで行けるって聞きました。", 
+                r: "Basu de ikeru tte kikimashita.", 
+                zh: "聽說可以搭公車去。", 
+                accepted: ["バスで行けるって聞きました", "バスでいけるって聞きました", "ばすでいけるってききました"] 
+            },
+            { 
+                h: "おおきいすいぞくかんがあって、きれいなさかながみられます", 
+                k: "大きい水族館があって、綺麗な魚が見られます。", 
+                r: "Ookii suizokukan ga atte, kirei na sakana ga miraremasu.", 
+                zh: "有很大的水族館，可以看見漂亮的魚。", 
+                accepted: ["大きい水族館があって綺麗な魚が見られます", "大きい水族館があってきれいな魚が見られます", "おおきいすいぞくかんがあってきれいなさかながみられます"] 
+            }
+        ];
+
+        let currentRound = 1;
+        let currentIndex = 0;
+        let currentList = [...wordData];
+        
+        let totalCorrect = 0;
+        let isCurrentCardCorrect = false;
+        let autoAdvanceTimeout = null;
+        
+        const roundTitle = document.getElementById('round-title');
+        const roundDesc = document.getElementById('round-desc');
+        const cardDisplay = document.getElementById('card-display');
+        const nextBtn = document.getElementById('next-btn');
+        const progress = document.getElementById('progress');
+        const finishScreen = document.getElementById('finish-screen');
+        const recordingStatus = document.getElementById('recording-status');
+        const startRecContainer = document.getElementById('start-record-container');
+        const startRecBtn = document.getElementById('start-rec-btn');
+        const downloadBtn = document.getElementById('download-btn');
+        
+        const pronunciationArea = document.getElementById('pronunciation-area');
+        const speechBtn = document.getElementById('speech-btn');
+        const feedbackText = document.getElementById('feedback-text');
+
+        let mediaRecorder;
+        let audioChunks = [];
+        let isRecording = false;
+
+        // 保存するファイル形式と拡張子を自動で決める変数
+        let mimeType = 'audio/webm';
+        let fileExtension = 'webm';
+
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        let recognition = null;
+        let isRecognizing = false;
+        
+        if (SpeechRecognition) {
+            recognition = new SpeechRecognition();
+            recognition.lang = 'ja-JP';
+            recognition.interimResults = false;
+            recognition.maxAlternatives = 1;
+
+            recognition.onstart = () => {
+                isRecognizing = true;
+                speechBtn.classList.add('listening');
+                speechBtn.innerHTML = '<span class="text-xl">👂</span> 聞き取り中...';
+                feedbackText.innerText = '';
+            };
+
+            recognition.onresult = (event) => {
+                let transcript = event.results[0][0].transcript;
+                // 句読点や空白を削除（正解判定しやすくするため）
+                transcript = transcript.replace(/[。、\s]/g, ''); 
+
+                const currentWord = currentList[currentIndex];
+
+                const isCorrect = currentWord.accepted.some(word => 
+                    transcript.includes(word)
+                );
+
+                if (isCorrect) {
+                    feedbackText.innerHTML = `<span class="text-emerald-600">⭕️ 正解！ (${transcript})</span>`;
+                    if (!isCurrentCardCorrect) {
+                        totalCorrect++;
+                        isCurrentCardCorrect = true;
+                    }
+                    
+                    if (isRecognizing) recognition.abort();
+                    if (autoAdvanceTimeout) clearTimeout(autoAdvanceTimeout);
+                    
+                    autoAdvanceTimeout = setTimeout(() => {
+                        goToNextCard();
+                    }, 1200);
+
+                } else {
+                    feedbackText.innerHTML = `<span class="text-rose-500">❌ もう少し！ (${transcript})</span>`;
+                }
+            };
+
+            recognition.onerror = (event) => {
+                if(event.error !== 'aborted'){
+                    feedbackText.innerHTML = `<span class="text-slate-500">聞き取れませんでした</span>`;
+                }
+            };
+
+            recognition.onend = () => {
+                isRecognizing = false;
+                speechBtn.classList.remove('listening');
+                speechBtn.innerHTML = '<span class="text-xl">🎤</span> もう一度チェック';
+            };
+        } else {
+            alert("お使いのブラウザは音声認識に対応していません。Chromeをご利用ください。");
+        }
+
+        function autoStartSpeechRecognition() {
+            if (!recognition) return;
+            try {
+                if (isRecognizing) {
+                    recognition.abort(); 
+                }
+                setTimeout(() => {
+                    try { recognition.start(); } catch(e){}
+                }, 100);
+            } catch (e) {
+                console.error("音声認識の開始に失敗しました", e);
+            }
+        }
+
+        async function initRecording() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                
+                // 【修正ポイント】WebM（Chrome用）を先にチェックする順番に変更しました！
+                if (window.MediaRecorder && MediaRecorder.isTypeSupported) {
+                    if (MediaRecorder.isTypeSupported('audio/webm')) {
+                        mimeType = 'audio/webm';
+                        fileExtension = 'webm';
+                    } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+                        mimeType = 'audio/mp4';
+                        fileExtension = 'mp4';
+                    }
+                }
+
+                // 判別した形式で録音を開始する
+                mediaRecorder = new MediaRecorder(stream, { mimeType: mimeType });
+                
+                mediaRecorder.ondataavailable = (event) => {
+                    audioChunks.push(event.data);
+                };
+
+                mediaRecorder.onstop = () => {
+                    // 正しい形式の塊（Blob）を作成
+                    const audioBlob = new Blob(audioChunks, { type: mimeType });
+                    const audioUrl = URL.createObjectURL(audioBlob);
+                    
+                    downloadBtn.onclick = () => {
+                        const link = document.createElement('a');
+                        link.href = audioUrl;
+                        // 正しい拡張子で保存
+                        link.download = `vocabulary_session_${new Date().getTime()}.${fileExtension}`;
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                    };
+                    downloadBtn.classList.remove('hidden');
+                };
+
+                mediaRecorder.start();
+                isRecording = true;
+                recordingStatus.classList.remove('hidden');
+                startRecContainer.classList.add('hidden');
+                
+                pronunciationArea.classList.remove('hidden');
+                pronunciationArea.classList.add('flex');
+
+                autoStartSpeechRecognition();
+
+            } catch (err) {
+                console.error("マイクのアクセスに失敗しました:", err);
+                alert("マイクの使用が許可されていないか、対応していません。");
+            }
+        }
+
+        function shuffle(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+            return array;
+        }
+
+        function updateCard() {
+            const item = currentList[currentIndex];
+            cardDisplay.innerHTML = '';
+            
+            isCurrentCardCorrect = false; 
+            feedbackText.innerHTML = '';
+            speechBtn.innerHTML = '<span class="text-xl">🎤</span> 発音をチェック';
+            
+            if (currentRound === 1 && currentIndex === 0 && !isRecording) {
+                startRecContainer.classList.remove('hidden');
+                pronunciationArea.classList.add('hidden');
+            } else {
+                startRecContainer.classList.add('hidden');
+            }
+
+            // 長文になるため、文字サイズ(text-4xlなど)を調整しても良いかもしれません
+            if (currentRound === 1) {
+                roundTitle.innerText = "1回目の練習";
+                roundDesc.innerText = "順番通り（すべて表示）";
+                cardDisplay.innerHTML = `
+                    <div class="text-lg font-medium text-indigo-500 mb-1">${item.h}</div>
+                    <div class="text-2xl md:text-3xl font-bold text-slate-800 mb-2">${item.k}</div>
+                    <div class="text-base text-slate-400 font-mono italic mb-8">${item.r}</div>
+                    <div class="text-xl text-emerald-600 font-bold">${item.zh}</div>
+                `;
+            } else if (currentRound === 2) {
+                roundTitle.innerText = "2回目の練習";
+                roundDesc.innerText = "シャッフル（ひらがな・台湾華語）";
+                cardDisplay.innerHTML = `
+                    <div class="text-2xl font-bold text-slate-800 mb-12">${item.h}</div>
+                    <div class="text-xl text-emerald-600 font-bold">${item.zh}</div>
+                `;
+            } else if (currentRound === 3) {
+                roundTitle.innerText = "3回目の練習";
+                roundDesc.innerText = "シャッフル（台湾華語のみ）";
+                cardDisplay.innerHTML = `
+                    <div class="text-3xl font-bold text-emerald-600 py-6">${item.zh}</div>
+                `;
+            }
+
+            const totalSteps = currentList.length;
+            const progressVal = (currentIndex / totalSteps) * 100;
+            progress.style.width = `${progressVal}%`;
+
+            if (currentIndex === currentList.length - 1) {
+                nextBtn.innerText = currentRound === 3 ? "完了" : "次のラウンドへ";
+            } else {
+                nextBtn.innerText = "次へ";
+            }
+
+            if (isRecording) {
+                autoStartSpeechRecognition();
+            }
+        }
+
+        function goToNextCard() {
+            if (autoAdvanceTimeout) {
+                clearTimeout(autoAdvanceTimeout);
+                autoAdvanceTimeout = null;
+            }
+
+            if (currentIndex < currentList.length - 1) {
+                currentIndex++;
+                updateCard();
+            } else {
+                if (currentRound < 3) {
+                    currentRound++;
+                    currentIndex = 0;
+                    currentList = shuffle([...wordData]);
+                    updateCard();
+                } else {
+                    progress.style.width = `100%`;
+                    finishScreen.classList.remove('hidden');
+                    
+                    const totalQuestions = wordData.length * 3; 
+                    document.getElementById('score-display').innerText = `正解数: ${totalCorrect} / ${totalQuestions}`;
+                    
+                    if (isRecording && mediaRecorder && mediaRecorder.state !== 'inactive') {
+                        mediaRecorder.stop();
+                        isRecording = false;
+                        recordingStatus.classList.add('hidden');
+                        
+                        if (isRecognizing && recognition) {
+                            recognition.abort();
+                        }
+                    }
+                }
+            }
+        }
+
+        speechBtn.addEventListener('click', () => {
+            if (recognition) {
+                autoStartSpeechRecognition(); 
+            }
+        });
+
+        nextBtn.addEventListener('click', goToNextCard);
+
+        startRecBtn.addEventListener('click', () => {
+            initRecording();
+        });
+
+        window.onload = () => {
+            updateCard();
+        };
+    </script>
+</body>
+</html>
