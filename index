@@ -3,8 +3,74 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>日本語単語練習ツール（発音判定＆セッション録音付）</title>
-   <script>
+    <title>日本語文章練習ツール（発音判定＆セッション録音付）</title>
+    <!-- 画面を綺麗にするためのTailwind CSSを読み込みます -->
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-100 text-slate-800 min-h-screen p-4 flex flex-col items-center justify-center">
+
+    <!-- メインのカード部分 -->
+    <div class="max-w-2xl w-full bg-white rounded-2xl shadow-xl p-6 md:p-10 relative">
+        
+        <!-- 進捗バー -->
+        <div class="w-full bg-slate-200 rounded-full h-2 mb-8">
+            <div id="progress" class="bg-indigo-500 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+        </div>
+
+        <!-- ラウンド情報 -->
+        <div class="text-center mb-6">
+            <h1 id="round-title" class="text-2xl font-bold text-slate-700">1回目の練習</h1>
+            <p id="round-desc" class="text-sm text-slate-500 mt-1">順番通り（すべて表示）</p>
+        </div>
+
+        <!-- テキスト表示エリア -->
+        <div id="card-display" class="text-center min-h-[200px] flex flex-col justify-center items-center mb-8">
+            <!-- ここにJavaScriptで文字が表示されます -->
+        </div>
+
+        <!-- 録音開始画面（最初だけ表示） -->
+        <div id="start-record-container" class="text-center mb-8">
+            <p class="text-sm text-slate-500 mb-3">練習全体を録音して後で確認できます</p>
+            <button id="start-rec-btn" class="bg-rose-500 hover:bg-rose-600 text-white font-bold py-3 px-8 rounded-full shadow-md transition-colors">
+                🔴 録音を許可してスタート
+            </button>
+        </div>
+
+        <!-- 録音中の表示 -->
+        <div id="recording-status" class="hidden text-center mb-4">
+            <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-rose-100 text-rose-800">
+                <span class="w-2 h-2 bg-rose-500 rounded-full animate-pulse mr-2"></span> 録音中
+            </span>
+        </div>
+
+        <!-- 発音チェックボタンと結果表示エリア -->
+        <div id="pronunciation-area" class="hidden flex-col items-center mb-8 gap-4">
+            <button id="speech-btn" class="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-bold py-4 px-8 rounded-full shadow-sm transition-all duration-300 flex items-center justify-center gap-2 min-w-[250px]">
+                <span class="text-xl">🎤</span> 発音をチェック
+            </button>
+            <div id="feedback-text" class="text-lg font-bold min-h-[30px]"></div>
+        </div>
+
+        <!-- 次へボタン -->
+        <div class="text-center">
+            <button id="next-btn" class="bg-slate-800 hover:bg-slate-900 text-white font-bold py-3 px-10 rounded-lg shadow-md transition-colors w-full sm:w-auto">
+                次へ
+            </button>
+        </div>
+
+        <!-- 終了画面 -->
+        <div id="finish-screen" class="hidden mt-8 text-center border-t border-slate-200 pt-8 absolute inset-0 bg-white rounded-2xl flex flex-col items-center justify-center z-10">
+            <h2 class="text-3xl font-bold text-emerald-600 mb-4">🎉 お疲れ様でした！</h2>
+            <p id="score-display" class="text-xl font-medium text-slate-700 mb-8">正解数: 0 / 0</p>
+            <button id="download-btn" class="hidden bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-4 px-8 rounded-full shadow-md transition-colors flex items-center gap-2">
+                ⬇️ 録音データをダウンロード
+            </button>
+        </div>
+
+    </div>
+
+    <script>
+        // --- データ部分 ---
         const wordData = [
             { 
                 h: "ほっかいどうはしんせんなかにとかうにとかたべられますよ", 
@@ -39,10 +105,11 @@
                 k: "大きい水族館があって、綺麗な魚が見られます。", 
                 r: "Ookii suizokukan ga atte, kirei na sakana ga miraremasu.", 
                 zh: "有很大的水族館，可以看見漂亮的魚。", 
-                accepted: ["大きい水族館があって綺麗な魚が見られます", "大きい水族館があってきれいな魚が見られます", "おおきいすいぞくかんがあってきれいなさかながみられます"] 
+                accepted: ["大きい水族館があって綺麗な魚が見られます", "大きい水族館があってきれいな魚が見られます", "おおきいすいぞくかんがあってきれいなさかながみられます", "大きい水族館があってきれいな魚が見れます"] 
             }
         ];
 
+        // --- ロジック部分 ---
         let currentRound = 1;
         let currentIndex = 0;
         let currentList = [...wordData];
@@ -70,7 +137,6 @@
         let audioChunks = [];
         let isRecording = false;
 
-        // 保存するファイル形式と拡張子を自動で決める変数
         let mimeType = 'audio/webm';
         let fileExtension = 'webm';
 
@@ -86,21 +152,17 @@
 
             recognition.onstart = () => {
                 isRecognizing = true;
-                speechBtn.classList.add('listening');
+                speechBtn.classList.add('bg-indigo-300');
                 speechBtn.innerHTML = '<span class="text-xl">👂</span> 聞き取り中...';
                 feedbackText.innerText = '';
             };
 
             recognition.onresult = (event) => {
                 let transcript = event.results[0][0].transcript;
-                // 句読点や空白を削除（正解判定しやすくするため）
                 transcript = transcript.replace(/[。、\s]/g, ''); 
 
                 const currentWord = currentList[currentIndex];
-
-                const isCorrect = currentWord.accepted.some(word => 
-                    transcript.includes(word)
-                );
+                const isCorrect = currentWord.accepted.some(word => transcript.includes(word));
 
                 if (isCorrect) {
                     feedbackText.innerHTML = `<span class="text-emerald-600">⭕️ 正解！ (${transcript})</span>`;
@@ -114,7 +176,7 @@
                     
                     autoAdvanceTimeout = setTimeout(() => {
                         goToNextCard();
-                    }, 1200);
+                    }, 1500); // すぐ切り替わると読めないので1.5秒待つ
 
                 } else {
                     feedbackText.innerHTML = `<span class="text-rose-500">❌ もう少し！ (${transcript})</span>`;
@@ -129,7 +191,7 @@
 
             recognition.onend = () => {
                 isRecognizing = false;
-                speechBtn.classList.remove('listening');
+                speechBtn.classList.remove('bg-indigo-300');
                 speechBtn.innerHTML = '<span class="text-xl">🎤</span> もう一度チェック';
             };
         } else {
@@ -154,7 +216,6 @@
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 
-                // 【修正ポイント】WebM（Chrome用）を先にチェックする順番に変更しました！
                 if (window.MediaRecorder && MediaRecorder.isTypeSupported) {
                     if (MediaRecorder.isTypeSupported('audio/webm')) {
                         mimeType = 'audio/webm';
@@ -165,7 +226,6 @@
                     }
                 }
 
-                // 判別した形式で録音を開始する
                 mediaRecorder = new MediaRecorder(stream, { mimeType: mimeType });
                 
                 mediaRecorder.ondataavailable = (event) => {
@@ -173,14 +233,12 @@
                 };
 
                 mediaRecorder.onstop = () => {
-                    // 正しい形式の塊（Blob）を作成
                     const audioBlob = new Blob(audioChunks, { type: mimeType });
                     const audioUrl = URL.createObjectURL(audioBlob);
                     
                     downloadBtn.onclick = () => {
                         const link = document.createElement('a');
                         link.href = audioUrl;
-                        // 正しい拡張子で保存
                         link.download = `vocabulary_session_${new Date().getTime()}.${fileExtension}`;
                         document.body.appendChild(link);
                         link.click();
@@ -228,28 +286,27 @@
                 startRecContainer.classList.add('hidden');
             }
 
-            // 長文になるため、文字サイズ(text-4xlなど)を調整しても良いかもしれません
             if (currentRound === 1) {
                 roundTitle.innerText = "1回目の練習";
                 roundDesc.innerText = "順番通り（すべて表示）";
                 cardDisplay.innerHTML = `
-                    <div class="text-lg font-medium text-indigo-500 mb-1">${item.h}</div>
-                    <div class="text-2xl md:text-3xl font-bold text-slate-800 mb-2">${item.k}</div>
-                    <div class="text-base text-slate-400 font-mono italic mb-8">${item.r}</div>
+                    <div class="text-base font-medium text-indigo-500 mb-2">${item.h}</div>
+                    <div class="text-2xl font-bold text-slate-800 mb-4 leading-relaxed">${item.k}</div>
+                    <div class="text-sm text-slate-400 font-mono italic mb-8">${item.r}</div>
                     <div class="text-xl text-emerald-600 font-bold">${item.zh}</div>
                 `;
             } else if (currentRound === 2) {
                 roundTitle.innerText = "2回目の練習";
                 roundDesc.innerText = "シャッフル（ひらがな・台湾華語）";
                 cardDisplay.innerHTML = `
-                    <div class="text-2xl font-bold text-slate-800 mb-12">${item.h}</div>
+                    <div class="text-xl font-bold text-slate-800 mb-10 leading-relaxed">${item.h}</div>
                     <div class="text-xl text-emerald-600 font-bold">${item.zh}</div>
                 `;
             } else if (currentRound === 3) {
                 roundTitle.innerText = "3回目の練習";
                 roundDesc.innerText = "シャッフル（台湾華語のみ）";
                 cardDisplay.innerHTML = `
-                    <div class="text-3xl font-bold text-emerald-600 py-6">${item.zh}</div>
+                    <div class="text-2xl font-bold text-emerald-600 py-6 leading-relaxed">${item.zh}</div>
                 `;
             }
 
@@ -258,7 +315,7 @@
             progress.style.width = `${progressVal}%`;
 
             if (currentIndex === currentList.length - 1) {
-                nextBtn.innerText = currentRound === 3 ? "完了" : "次のラウンドへ";
+                nextBtn.innerText = currentRound === 3 ? "完了して結果を見る" : "次のラウンドへ";
             } else {
                 nextBtn.innerText = "次へ";
             }
